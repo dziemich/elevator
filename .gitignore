@@ -1,0 +1,6 @@
+
+*
+!*/
+!*.erl
+!*.md
+!.gitignore
