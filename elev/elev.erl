@@ -7,36 +7,31 @@ main() ->
     Listen_PID = spawn(elev, listen, []),
     Error_Handler_PID = spawn(elev, handle, []),
     Start_Floor_PID = spawn(elev, start_floor, []),
-
-    % mozna dodac tryb losowy
-    % proces inicjalizujacy (zbiera informacje o windzie na poczatku)
-    % proces konczacy cala zabawe
     
     ets:new(pids, [set, named_table]),
     ets:new(var, [set, named_table, public]),
     ets:insert(pids, [{lpid, Listen_PID}, {mpid, Main_PID}, {epid, Elevator_PID}, {error_pid, Error_Handler_PID}, {start_floor_pid, Start_Floor_PID}]),
     [{mpid, Main_PID}] = ets:lookup(pids, mpid),
-
-    io:format("Welcome to elevator simulator!"),
-    timer:sleep(1000),
-    Start_Floor_PID ! {start}.
-
-%%odpal start_floor       
+    draw_elevator(0,3),
+    io:format(os:cmd(clear)),
+    io:format("\nWelcome to elevator simulator!"),
+    timer:sleep(2000),
+    Start_Floor_PID ! {start}.      
 
 start_floor() ->
     [{error_pid, Error_Handler_PID}] = ets:lookup(pids, error_pid),
     receive
         {start} ->
             io:format(os:cmd(clear)),
-            InputFloors = io:fread("Enter requested amount of floors for your simulation: ","~d"),
+            InputFloors = io:fread("\nEnter requested amount of floors for your simulation: ","~d"),
             case InputFloors of
                 {ok, [Max_Floor]} ->
                     if
                         Max_Floor =< 0 ->
-                            ets:insert(var, [{max_floor, -1}]),
+                            ets:insert(var, [{max_floor, 10}, {automatic, -1}]),
                             automatic_input();
                         true ->
-                            ets:insert(var, [{max_floor, Max_Floor}]),                 
+                            ets:insert(var, [{max_floor, Max_Floor}, {automatic, 0}]),                 
                             handle_input()
                     end;
                 {error, _} -> 
@@ -60,7 +55,6 @@ handle_input() ->
     case InputWhere of
         {ok, [N1]} -> case InputTo of
             {ok, [N2]} ->
-                io:format("\nFrom: ~p | To: ~p \n",[N1, N2]),
                 if 
                     (N1 > Max_Floor) or (N1 < 0) or (N2 > Max_Floor) or (N2 < 0) ->
                         Error_Handler_PID ! {invalid_floor};
@@ -83,7 +77,6 @@ listen() ->
     end.        
 
 identify(CurrentFloor, RequestedFloor) ->
-    %io:format("\n identify called \n"),
     [{epid, Elev_PID}] = ets:lookup(pids, epid),
     Elev_PID ! {success, CurrentFloor},
     Random = rand:uniform(10),
@@ -95,13 +88,12 @@ identify(CurrentFloor, RequestedFloor) ->
 finished() -> 
     receive 
         {finished} ->
-            [{max_floor, Max_Floor}] = ets:lookup(var, max_floor),
+            [{automatic, Auto}] = ets:lookup(var, automatic),
             if 
-                Max_Floor =/= -1 ->
+                Auto =/= -1 ->
                     handle_input(),
                     finished();
                 true ->
-                    io:format("true"),
                     automatic_input(),
                     finished()
             end
@@ -127,27 +119,33 @@ handle() ->
     end.
 
 
-moveToFloor(CurrentFloor, Floor) when CurrentFloor > Floor ->
+moveToFloor(Current_Floor, Floor) when Current_Floor > Floor ->
+    [{max_floor, Max_Floor}] = ets:lookup(var, max_floor),
     timer:sleep(1000),
-    io:format("\nFloor: ~p", [CurrentFloor]),    
-    moveToFloor(CurrentFloor-1, Floor);
+    io:format("\e[H\e[J"),
+    draw_elevator(Current_Floor, Max_Floor),
+    moveToFloor(Current_Floor-1, Floor);
 
-moveToFloor(CurrentFloor, Floor) when CurrentFloor < Floor ->
+moveToFloor(Current_Floor, Floor) when Current_Floor < Floor ->
+    [{max_floor, Max_Floor}] = ets:lookup(var, max_floor),
     timer:sleep(1000),
-    io:format("\nFloor: ~p", [CurrentFloor]),
-    moveToFloor(CurrentFloor+1, Floor);
+    io:format("\e[H\e[J"),    
+    draw_elevator(Current_Floor, Max_Floor),
+    moveToFloor(Current_Floor+1, Floor);
 
-moveToFloor(CurrentFloor, Floor) when CurrentFloor =:= Floor -> 
-    io:format("\nFloor arrived: ~p\n", [CurrentFloor]),
-    [{mpid, Main_PID}] = ets:lookup(pids, mpid),    
+moveToFloor(Current_Floor, Floor) when Current_Floor =:= Floor -> 
+    [{max_floor, Max_Floor}] = ets:lookup(var, max_floor),
+    [{mpid, Main_PID}] = ets:lookup(pids, mpid),
+    timer:sleep(1000),
+    io:format("\e[H\e[J"),
+    draw_elevator(Current_Floor, Max_Floor),
     Main_PID ! {finished},
     Floor.
 
 move(StartFloor) ->
-   %io:format("in move\n"),
     receive
         {success, Floor} -> 
-            io:format("\nGoing to floor ~p", [Floor]),
+            io:format(os:cmd(clear)), 
             F = moveToFloor(StartFloor, Floor),
             move(F);
         {success, scan, Floor} ->
@@ -162,3 +160,16 @@ move(StartFloor) ->
             move(StartFloor)
         end.     
 
+draw_elevator(_, Max_Floor) when Max_Floor =:= -1 -> 
+    timer:sleep(100),
+    io:format("---");
+
+draw_elevator(Current_Floor, Max_Floor) when Current_Floor =/= Max_Floor ->
+    timer:sleep(100),
+    io:format("| | ~p", [Max_Floor]),
+    draw_elevator(Current_Floor, Max_Floor - 1);
+
+draw_elevator(Current_Floor, Max_Floor) when Current_Floor =:= Max_Floor ->
+    timer:sleep(100),
+    io:format("|O| ~p", [Max_Floor]),
+    draw_elevator(Current_Floor, Max_Floor - 1).
